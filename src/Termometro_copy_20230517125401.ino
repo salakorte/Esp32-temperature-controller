@@ -1,5 +1,5 @@
 #define __DEBUG__
- 
+
 #include <SPI.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
@@ -8,82 +8,84 @@
 #include <IRsend.h>
 #include <ir_Gree.h>
 
-
-
-
 #ifdef ESP32
-  #include <WiFi.h>
+#include <WiFi.h>
 #else
-  #include <ESP8266WiFi.h>
+#include <ESP8266WiFi.h>
 #endif
 
 #include <WiFiClientSecure.h>
-#include <UniversalTelegramBot.h>   // Universal Telegram Bot Library written by Brian Lough: https://github.com/witnessmenow/Universal-Arduino-Telegram-Bot
+#include <UniversalTelegramBot.h>
 #include <ArduinoJson.h>
 
-const char* ssid = "MiFibra-1980-plus";
-const char* password = "45Rtfgcv@_739";
+const char *ssid = "MiFibra-1980-plus";
+const char *password = "45Rtfgcv@_739";
 
-#define BOTtoken "6239834702:AAFiD5nxEEqcG3ZBAaC2474E8AIoPkBCQCg"  // your Bot Token (Get from Botfather)
-
-// Use @myidbot to find out the chat ID of an individual or a group
-// Also note that you need to click "start" on a bot before it can
-// message you
+#define BOTtoken "6239834702:AAFiD5nxEEqcG3ZBAaC2474E8AIoPkBCQCg"
 #define CHAT_ID "1349728576"
+
+const String authorizedUsers[] = {"1349728576", "987654321"};
 
 WiFiClientSecure client;
 UniversalTelegramBot bot(BOTtoken, client);
 
-int botRequestDelay = 1000;
+int botRequestDelay = 250;
 unsigned long lastTimeBotRan;
 
 unsigned long tiempoAnterior = 0;
 unsigned long intervalo = 300000;
 
+unsigned long reinicioProgramado;
+unsigned long intervaloReinicio = 12 * 60 * 60 * 1000;
+
 int valortemp = 0;
 
+int lastProcessedMessageId = 0;
+
 #include "DHT.h"
- 
-// Definir constantes
-#define ANCHO_PANTALLA 128 // ancho pantalla OLED
-#define ALTO_PANTALLA 64 // alto pantalla OLED
- 
-// Objeto de la clase Adafruit_SSD1306
+
+#define ANCHO_PANTALLA 128
+#define ALTO_PANTALLA 64
+
 #define SCREEN_ADDRESS 0x3C
 Adafruit_SSD1306 display(ANCHO_PANTALLA, ALTO_PANTALLA, &Wire, -1);
 
 #define DHTPIN 33
 #define DHTTYPE DHT22
 
-const uint16_t kIrLed = 4;  // ESP8266 GPIO pin to use. Recommended: 4 (D2).
-IRGreeAC ac(kIrLed);  // Set the GPIO to be used for sending messages.
+const uint16_t kIrLed = 4;
+IRGreeAC ac(kIrLed);
 
 DHT dht(DHTPIN, DHTTYPE);
 
- float hum;
- float temp;
+float hum;
+float temp;
 
- void printState() {
-  // Display the settings.
+
+void printState()
+{
   Serial.println("GREE A/C remote is in the following state:");
   Serial.printf("  %s\n", ac.toString().c_str());
-  // Display the encoded IR sequence.
-  unsigned char* ir_code = ac.getRaw();
+
+  unsigned char *ir_code = ac.getRaw();
   Serial.print("IR Code: 0x");
   for (uint8_t i = 0; i < kGreeStateLength; i++)
     Serial.printf("%02X", ir_code[i]);
   Serial.println();
 
- WiFi.mode(WIFI_STA);
+  WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
-  #ifdef ESP32
-    client.setCACert(TELEGRAM_CERTIFICATE_ROOT); // Add root certificate for api.telegram.org
-  #endif
-  while (WiFi.status() != WL_CONNECTED) {
+
+#ifdef ESP32
+  client.setCACert(TELEGRAM_CERTIFICATE_ROOT);
+#endif
+
+  while (WiFi.status() != WL_CONNECTED)
+  {
     delay(1000);
     Serial.println("Connecting to WiFi..");
   }
-  // Print ESP32 Local IP Address
+
   Serial.println(WiFi.localIP());
 }
 
@@ -92,15 +94,13 @@ void bot_setup()
   const String commands = F("["
                             "{\"comando\":\"start\",  \"description\":\"Get bot usage help\"},"
                             "{\"comando\":\"start\", \"description\":\"Message sent when you open a chat with a bot\"},"
-                            "{\"comando\":\"status\",\"description\":\"Answer device current status\"}" // no comma on last command
+                            "{\"comando\":\"status\",\"description\":\"Answer device current status\"}"
                             "]");
   bot.setMyCommands(commands);
-  //bot.sendMessage("25235518", "Hola amigo!", "Markdown");
 }
 
-
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////SETUP
-void setup() {
+void setup()
+{
 #ifdef __DEBUG__
   ac.begin();
   Serial.begin(115200);
@@ -108,16 +108,12 @@ void setup() {
   hum = 0;
   delay(200);
   Serial.println("Iniciando pantalla OLED");
-    // Set up what we want to send. See ir_Gree.cpp for all the options.
-  // Most things default to off.
-  Serial.println("Default state of the remote.");
   printState();
   Serial.println("Setting desired state for A/C.");
   ac.on();
   ac.setFan(1);
-  // kGreeAuto, kGreeDry, kGreeCool, kGreeFan, kGreeHeat
   ac.setMode(kGreeCool);
-  ac.setTemp(22);  // 16-30C
+  ac.setTemp(22);
   ac.setSwingVertical(false, kGreeSwingAuto);
   ac.setXFan(false);
   ac.setLight(true);
@@ -125,174 +121,192 @@ void setup() {
   ac.setTurbo(false);
   ac.send();
   Serial.println("Ac encendido en setup");
-#endif
- 
-  // Iniciar pantalla OLED en la dirección 0x3C
-  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-#ifdef __DEBUG__
-    Serial.println("No se encuentra la pantalla OLED");
-#endif
-    while (true);
-  }
-   String keyboardJson2 = "[[{ \"text\" : \"Encender\", \"callback_data\" : \"/ac_on\" }],[{ \"text\" : \"Apagar\", \"callback_data\" : \"/ac_off\" }],[{ \"text\" : \"Estado\", \"callback_data\" : \"/estado\" }]]";
-        bot.sendMessageWithInlineKeyboard(CHAT_ID, "Elegir una de las siguientes opciones", "", keyboardJson2);
-}
- ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
-void loop() {
-
-  unsigned long tiempoActual = millis();
-  hum = dht.readHumidity();
-  temp = dht.readTemperature();
-    // Limpiar buffer
-  display.clearDisplay();
- 
-  // Tamaño del texto
-  display.setTextSize(2);
-  // Color del texto
-  display.setTextColor(SSD1306_WHITE);
-  // Posición del texto
-  
-  // Escribir texto
-  display.setCursor(0, 0);
-  display.println("Temp");
-  display.setCursor(10,17);
-  display.println(temp);
-  display.println("Humedad");
-  display.setCursor(10,49);
-  display.println(hum);
- 
-  // Enviar a pantalla
+  display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS);
   display.display();
+  delay(1000);
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.println("Iniciando...");
+  display.display();
+  delay(2000);
+  display.clearDisplay();
+#else
+  display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS);
+  display.display();
+  delay(1000);
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.println("Iniciando...");
+  display.display();
+  delay(2000);
+  display.clearDisplay();
+#endif
 
-    // Now send the IR signal.
-/*#if SEND_GREE
-  Serial.println("Sending IR command to A/C ...");
-  ac.send();
-#endif  // SEND_GREE/*/
-  //printState();
-  delay(5000);
+  Serial.println("WiFi connected");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+  display.println("WiFi connected");
+  display.print("IP address:");
+  display.println(WiFi.localIP());
+  display.display();
+  delay(2000);
+  display.clearDisplay();
+  display.println("Conectado");
+  display.display();
+  delay(2000);
+  display.clearDisplay();
+  display.println("Enviando mensaje");
+  display.display();
+  delay(2000);
+  display.clearDisplay();
 
-  if (millis() > lastTimeBotRan + botRequestDelay)  {
-    int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
+  bot_setup();
 
-    while(numNewMessages) {
-      Serial.println("got response");
-      handleNewMessages(numNewMessages);
-      numNewMessages = bot.getUpdates(bot.last_message_received + 1);
-    }
-    lastTimeBotRan = millis();
-  }
-if (tiempoActual - tiempoAnterior >= intervalo) {
-  if (temp > 23) {
-  ac.on();
-  ac.setFan(1);
-  // kGreeAuto, kGreeDry, kGreeCool, kGreeFan, kGreeHeat
-  ac.setMode(kGreeCool);
-  ac.setTemp(22);  // 16-30C
-  ac.setSwingVertical(false, kGreeSwingAuto);
-  ac.setXFan(true);
-  ac.setLight(true);
-  ac.setSleep(false);
-  ac.setTurbo(false);
-    Serial.println(F("AC Switched On"));
-    ac.send();
-  
-  }
-  else if (temp < 21) {
-  ac.off();
-    Serial.println(F("AC Switched Off"));
-    ac.send();
-    
-  }
+  Serial.println("Bot ready");
+  display.println("Bot ready");
+  display.display();
+  delay(2000);
+  display.clearDisplay();
 
-   tiempoAnterior = tiempoActual;
-  }
+  lastTimeBotRan = 0;
 
   
 }
 
-// Handle what happens when you receive new messages
-/*void handleNewMessages(int numNewMessages) {
-  Serial.println("handleNewMessages");
-  Serial.println(String(numNewMessages));
 
- / for (int i=0; i<numNewMessages; i++) {
-    // Chat id of the requester
+
+void handleNewMessages(int numNewMessages)
+{
+  for (int i = 0; i < numNewMessages; i++)
+  {
     String chat_id = String(bot.messages[i].chat_id);
-    if (chat_id != CHAT_ID){
-      bot.sendMessage(chat_id, "Unauthorized user", "");
+    String text = bot.messages[i].text;
+    String command = text.substring(0, text.indexOf(' '));
+
+    // Verificar si el chat_id está en la lista de usuarios autorizados
+    bool isAuthorized = false;
+    for (const auto& user : authorizedUsers) {
+      if (chat_id.equals(user)) {
+        isAuthorized = true;
+        break;
+      }
+    }
+
+    if (!isAuthorized) {
+      // Si el chat_id no está autorizado, ignorar el mensaje
       continue;
     }
-  //convertir de float a string
-    String strTemp = String(temp);
-    String strHum = String(hum);
-    // Print the received message
-    String text = bot.messages[i].text;
-    Serial.println(text);
 
-    String from_name = bot.messages[i].from_name;
-
-    if (text == "/menu") {
-      /*String welcome = "Bienvenido, " + from_name + ".\n";
-      welcome += "Usa los siguientes comandos para navegar.\n\n";
-      welcome += "/ac_on Para encender el aire \n";
-      welcome += "/ac_off Para apagar el aire \n";
-      welcome += "/estado para ver la temperatura \n";
-      welcome += "/temp x [Donde la x pones la temperatura\n";
-      welcome += "deseada]Para poner la temperatura\n";
-      bot.sendMessage(chat_id, welcome, "");*/
-     // String keyboardJson = "[[{ \"text\" : \"Encender\", \"callback_data\" : \"/ac_on\" }],[{ \"text\" : \"Apagar\", \"callback_data\" : \"/ac_off\" }],[{ \"text\" : \"Estado\", \"callback_data\" : \"/estado\" }]]";
-      //  bot.sendMessageWithInlineKeyboard(CHAT_ID, "Elegir una de las siguientes opciones", "", keyboardJson);
-      //  if (text == "/options")
+    if (command == "/start")
     {
-      String keyboardJson = "[[\"/ac_on\", \"/ac_off\"],[\"/estado\"]]";
-      bot.sendMessageWithReplyKeyboard(chat_id, "Choose from one of the following options", "", keyboardJson, true);
-    }
-    }
+      // Crear los botones del teclado de respuesta
+      String keyboard = "[[\"/status\", \"/ac_on\"], [\"/ac_off\"]]";
 
- if (text == "/start")
+      // Enviar mensaje con los botones del teclado de respuesta
+      bot.sendMessageWithReplyKeyboard(chat_id, "Hola " + bot.messages[i].from_name + "!\n"
+                        "Soy un bot de control de aire acondicionado. "
+                        "Elige una opción:", "Markdown", keyboard);
+    }
+    else if (command == "/status")
     {
-     String welcome = "Bienvenido, " + from_name + ".\n";
-      welcome += "Usa los siguientes comandos para navegar.\n\n";
-      welcome += "/ac_on Para encender el aire \n";
-      welcome += "/ac_off Para apagar el aire \n";
-      welcome += "/estado para ver la temperatura \n";
-      welcome += "/temp x [Donde la x pones la temperatura\n";
-      welcome += "deseada]Para poner la temperatura\n";
-      bot.sendMessage(chat_id, welcome, "Markdown");
-    
-    }
-    if (text == "/ac_on") {
-     ac.on();
-     ac.send();
-    }
-    
-    if (text == "/ac_off") {
-     ac.off();
-     ac.send();
-    }
+      float h = dht.readHumidity();
+      float t = dht.readTemperature();
 
-    if (text.startsWith("/temp")) {
-        String valorString = text.substring(7);
-        valortemp = valorString.toInt();
-        ac.on();
-        ac.setTemp(valortemp);
-        bot.sendMessage(chat_id, "Establecido: " + String(valortemp)+ "º");
+      if (isnan(h) || isnan(t))
+      {
+        String errorMessage = "Error al leer los datos de humedad y temperatura. Asegúrate de que el sensor esté conectado correctamente.";
+        bot.sendMessage(chat_id, errorMessage, "Markdown");
+      }
+      else
+      {
+        String statusMessage = "Estado actual del dispositivo:\n"
+                               "Temperatura: " + String(t) + " °C\n" +
+                               "Humedad: " + String(h) + " %";
+        bot.sendMessage(chat_id, statusMessage, "Markdown");
+      }
+    }
+    else if (command == "/ac_on")
+    {      
+      String statusMessage = "Dispositivo encendido:";
+      ac.on();
+      ac.setFan(1);
+      ac.setMode(kGreeCool);
+      ac.setTemp(22);
+      ac.setSwingVertical(false, kGreeSwingAuto);
+      ac.setXFan(false);
+      ac.setLight(true);
+      ac.setSleep(false);
+      ac.setTurbo(false);
+      ac.send();
+      bot.sendMessage(chat_id, statusMessage, "Markdown");  
+    }
+    else if (command == "/ac_off")
+    {      
+      ac.on();
+      ac.off();
+      ac.send();
+      String statusMessage = "Dispositivo apagado:";
+      bot.sendMessage(chat_id, statusMessage, "Markdown");  
+    }
+    else
+    {
+      String errorMessage = "Comando no reconocido. Envía '/start' para obtener ayuda.";
+      bot.sendMessage(chat_id, errorMessage, "Markdown");
+    }
+    lastProcessedMessageId = bot.messages[i].message_id;
+  }
 }
 
-    
-    if (text == "/estado") {
-      String State = "Estado de los sensores.\n";
-      State += "Temperatura de la sala:\n";
-      State += strTemp + "º.\n";
-      State += "Humedad en la sala:\n";
-      State += strHum + "g/m³.\n";
-      bot.sendMessage(chat_id, State, "");
 
-    }
-   
 
+void loop()
+{
+  if (millis() > lastTimeBotRan + botRequestDelay)
+  {
+    int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
+
+    while (numNewMessages)
+    {
+      int latestMessageId = bot.messages[numNewMessages - 1].message_id;
+
+      if (latestMessageId > lastProcessedMessageId)
+      {
+        handleNewMessages(numNewMessages);
+        lastProcessedMessageId = latestMessageId;
+      }
+
+      numNewMessages--;
     }
-   
+
+    lastTimeBotRan = millis();
   }
+
+  unsigned long tiempoActual = millis();
+    hum = dht.readHumidity();
+    temp = dht.readTemperature();
+
+      display.clearDisplay();
   
+  display.setTextSize(2);
+  display.setCursor(0, 0);
+  display.println("Temp:");
+  display.setCursor(0, 20);
+  display.println(temp);
+  display.setCursor(65, 20);
+  display.println("C");
+
+  display.setTextSize(1);
+  display.setCursor(0, 40);
+  display.println("Humedad:");
+  display.setCursor(50, 40);
+  display.println(hum);
+   display.setCursor(80, 40);
+  display.println("%");
+
+  display.display();
+  delay(2000);
+}
